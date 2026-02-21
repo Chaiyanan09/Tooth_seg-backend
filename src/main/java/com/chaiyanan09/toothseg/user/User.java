@@ -18,5 +18,9 @@ public class User {
 
     public String passwordHash;
 
+    @Indexed
+    public String resetTokenHash;
+    public Instant resetTokenExpiresAt;
+
     public Instant createdAt = Instant.now();
 }
