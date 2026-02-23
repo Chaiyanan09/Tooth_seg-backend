@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -33,10 +34,13 @@ public class PasswordResetService {
         this.encoder = encoder;
         this.mailService = mailService;
         this.frontendBaseUrl = trimRightSlash(frontendBaseUrl);
-        this.expiresMinutes = expiresMinutes;
+        this.expiresMinutes = Math.max(1, expiresMinutes); // กันค่า 0/ติดลบ
     }
 
-    // ขอ reset: generate token, เก็บ hash+expiry, แล้วส่งลิงก์ไปอีเมล
+    /**
+     * ขอ reset: generate token, เก็บ hash+expiry, แล้วส่งลิงก์ไปอีเมล
+     * NOTE: ไม่ควร throw error ออกไปหา client เพื่อไม่ให้ endpoint 500
+     */
     public void requestReset(String email) {
         String em = normalizeEmail(email);
         if (em.isBlank()) return;
@@ -54,10 +58,18 @@ public class PasswordResetService {
         u.resetTokenExpiresAt = Instant.now().plusSeconds(expiresMinutes * 60);
         users.save(u);
 
-        String link = frontendBaseUrl + "/reset-password?token=" + token;
+        String encodedToken = URLEncoder.encode(token, StandardCharsets.UTF_8);
+        String link = frontendBaseUrl + "/reset-password?token=" + encodedToken;
 
-        // ✅ ส่ง email (แทนการ println)
-        mailService.sendResetLink(u.email, link);
+        // ✅ สำคัญ: ห้ามให้ส่งเมลล้มแล้วทำ API 500
+        try {
+            mailService.sendResetLink(u.email, link);
+        } catch (Exception ex) {
+            // log ได้ แต่ไม่ throw
+            System.err.println("[MAIL ERROR] " + ex.getMessage());
+            // fallback: แสดงลิงก์ใน log เผื่อ debug
+            System.out.println("[RESET LINK] " + link);
+        }
     }
 
     public void resetPassword(String token, String newPassword, String confirmPassword) {
@@ -68,11 +80,14 @@ public class PasswordResetService {
 
         String tokenHash = sha256(token);
 
-        // ✅ หา user ด้วย query โดยตรง (ต้องมี method ใน repository)
         User u = users.findByResetTokenHash(tokenHash)
                 .orElseThrow(() -> new IllegalArgumentException("Invalid or expired token."));
 
+        // ถ้า expired -> เคลียร์ token ทิ้งแล้วตอบ error
         if (u.resetTokenExpiresAt == null || Instant.now().isAfter(u.resetTokenExpiresAt)) {
+            u.resetTokenHash = null;
+            u.resetTokenExpiresAt = null;
+            users.save(u);
             throw new IllegalArgumentException("Invalid or expired token.");
         }
 
