@@ -7,12 +7,17 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 
 @Service
 public class MailService {
 
-    @Value("${resend.apiKey:${RESEND_API_KEY:}}")
-    private String resendApiKey;
+    @Value("${mailjet.apiKey:${MAILJET_API_KEY:}}")
+    private String apiKey;
+
+    @Value("${mailjet.apiSecret:${MAILJET_API_SECRET:}}")
+    private String apiSecret;
 
     @Value("${app.mail.from:${APP_MAIL_FROM:}}")
     private String fromEmail;
@@ -20,61 +25,63 @@ public class MailService {
     @Value("${app.mail.fromName:${APP_MAIL_FROMNAME:ToothAI}}")
     private String fromName;
 
-    @Value("${app.reset.expiresMinutes:${APP_RESET_EXPIRES_MINUTES:15}}")
-    private int expiresMinutes;
-
     private final HttpClient http = HttpClient.newHttpClient();
 
     public void sendResetLink(String toEmail, String resetUrl) {
-        // ถ้าไม่ได้ตั้ง key -> ไม่ให้ระบบล่ม (กัน 500)
-        if (resendApiKey == null || resendApiKey.isBlank()) {
+        if (apiKey == null || apiKey.isBlank() || apiSecret == null || apiSecret.isBlank()) {
             System.out.println("[RESET LINK] " + resetUrl);
             return;
+        }
+        if (fromEmail == null || fromEmail.isBlank()) {
+            throw new RuntimeException("APP_MAIL_FROM is empty (must be a validated sender in Mailjet).");
         }
 
         String subject = "Reset your password";
         String text =
-                "Reset link (valid for " + expiresMinutes + " minutes):\n" +
+                "Reset link (valid for 15 minutes):\n" +
                         resetUrl + "\n\n" +
                         "If you did not request this, ignore this email.";
 
-        // Resend expects JSON:
-        // { "from": "Name <email>", "to": ["..."], "subject": "...", "text": "..." }
-        String json = """
+        String payload = """
         {
-          "from": "%s <%s>",
-          "to": ["%s"],
-          "subject": "%s",
-          "text": %s
+          "Messages":[
+            {
+              "From":{"Email":"%s","Name":"%s"},
+              "To":[{"Email":"%s"}],
+              "Subject":"%s",
+              "TextPart":%s
+            }
+          ]
         }
         """.formatted(
-                escape(fromName), escape(fromEmail), escape(toEmail), escape(subject), toJsonString(text)
+                esc(fromEmail), esc(fromName), esc(toEmail), esc(subject), jsonString(text)
         );
+
+        String basic = Base64.getEncoder().encodeToString((apiKey + ":" + apiSecret).getBytes(StandardCharsets.UTF_8));
 
         try {
             HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.resend.com/emails"))
-                    .header("Authorization", "Bearer " + resendApiKey)
+                    .uri(URI.create("https://api.mailjet.com/v3.1/send"))
+                    .header("Authorization", "Basic " + basic)
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(json))
+                    .POST(HttpRequest.BodyPublishers.ofString(payload))
                     .build();
 
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() >= 300) {
-                throw new RuntimeException("Resend error: " + res.statusCode() + " " + res.body());
+                throw new RuntimeException("Mailjet error: " + res.statusCode() + " " + res.body());
             }
         } catch (Exception e) {
-            // กันระบบล่มเป็น 500 (สำคัญ)
-            System.err.println("[MAIL ERROR] " + e.getMessage());
+            throw new RuntimeException("Failed to send email: " + e.getMessage(), e);
         }
     }
 
-    private static String escape(String s) {
+    private static String esc(String s) {
         return s == null ? "" : s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
-    private static String toJsonString(String s) {
-        String esc = escape(s).replace("\n", "\\n");
+    private static String jsonString(String s) {
+        String esc = esc(s).replace("\n", "\\n");
         return "\"" + esc + "\"";
     }
 }
