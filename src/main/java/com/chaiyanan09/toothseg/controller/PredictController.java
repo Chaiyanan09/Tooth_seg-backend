@@ -10,6 +10,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 
 import java.time.Instant;
 import java.util.*;
@@ -185,6 +187,21 @@ public class PredictController {
             fillSignedUrls(h);
         }
         return h;
+    }
+
+    @DeleteMapping("/history/{id}")
+    public ResponseEntity<Void> deleteHistory(Authentication auth, @PathVariable String id) {
+        String userId = extractUserId(auth);
+
+        PredictionHistory h = historyRepo.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "History not found"));
+
+        // Optional:
+        // ถ้าต้องการลบไฟล์ใน Cloudinary ด้วย ให้เรียก helper ลบตรงนี้
+        safeDeleteCloudinary(h);
+
+        historyRepo.delete(h);
+        return ResponseEntity.noContent().build();
     }
 
     // ===== helpers =====
@@ -435,5 +452,25 @@ public class PredictController {
             s = s.substring(comma + 1);
         }
         return s;
+    }
+
+    private void safeDeleteCloudinary(PredictionHistory h) {
+        if (!cloudinary.isEnabled() || h == null) return;
+
+        try {
+            if (h.getInputPublicId() != null && !h.getInputPublicId().isBlank()) {
+                // เรียก cloudinary helper ของคุณเพื่อลบ input
+            }
+        } catch (Exception e) {
+            System.out.println("[Cloudinary] input delete failed: " + e.getMessage());
+        }
+
+        try {
+            if (h.getOverlayPublicId() != null && !h.getOverlayPublicId().isBlank()) {
+                // เรียก cloudinary helper ของคุณเพื่อลบ overlay
+            }
+        } catch (Exception e) {
+            System.out.println("[Cloudinary] overlay delete failed: " + e.getMessage());
+        }
     }
 }
