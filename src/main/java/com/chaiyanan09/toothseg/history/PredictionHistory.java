@@ -1,56 +1,82 @@
 package com.chaiyanan09.toothseg.history;
 
-import org.springframework.data.annotation.Id;
-import org.springframework.data.annotation.Transient;
-import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
- * Keep MongoDB light:
- * - store only metadata + Cloudinary refs (+ optional compact missing/present lists)
+ * Table "prediction_history" (created by Flyway: db/migration/V1__init_schema.sql).
+ *
+ * Keep the database light:
+ * - store only metadata + Cloudinary refs (+ compact missing/present lists)
  * - DO NOT store huge fields like overlay base64 / raw ML json
  */
-@Document("prediction_history")
+@Entity
+@Table(name = "prediction_history")
 public class PredictionHistory {
 
     @Id
-    private String id;
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
 
-    @Indexed
-    private String userId;
+    // FK -> users.id (ON DELETE CASCADE), index (user_id, created_at DESC)
+    @Column(name = "user_id", nullable = false)
+    private UUID userId;
 
-    @Indexed
+    @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
+    @Column(name = "model_name", nullable = false)
     private String modelName = "HTC_SwinT_FPN";
 
     // path ของไฟล์ที่ FE ส่งมา (รองรับเลือก folder)
+    @Column(name = "path")
     private String path;
 
+    @Column(name = "inference_ms", nullable = false)
     private long inferenceMs;
 
     // ===== Compact result (optional) =====
-    // presentFdi: ["11","12",...]
+    // presentFdi: ["11","12",...]  -> PostgreSQL text[]
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "present_fdi", columnDefinition = "text[]")
     private List<String> presentFdi;
 
-    // missingFdi: ["18","28",...]
+    // missingFdi: ["18","28",...]  -> PostgreSQL text[]
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "missing_fdi", columnDefinition = "text[]")
     private List<String> missingFdi;
 
     // optional: score map เพื่อเอาไปโชว์ confidence แบบเบา ๆ
-    // เช่น {"11":0.98, "12":0.95, ...}
+    // เช่น {"11":0.98, "12":0.95, ...}  -> PostgreSQL jsonb
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "present_top_score_map", columnDefinition = "jsonb")
     private Map<String, Double> presentTopScoreMap;
 
     // ===== Cloudinary (authenticated/private) =====
+    @Column(name = "input_public_id")
     private String inputPublicId;
+    @Column(name = "input_version")
     private Long inputVersion;
+    @Column(name = "input_format")
     private String inputFormat;
 
+    @Column(name = "overlay_public_id")
     private String overlayPublicId;
+    @Column(name = "overlay_version")
     private Long overlayVersion;
+    @Column(name = "overlay_format")
     private String overlayFormat; // usually "png"
 
     // ===== Transient: ส่งให้ FE แต่ไม่เก็บลง DB =====
@@ -68,8 +94,8 @@ public class PredictionHistory {
     @Transient
     private List<Instance> instances;
 
-    public String getId() { return id; }
-    public String getUserId() { return userId; }
+    public UUID getId() { return id; }
+    public UUID getUserId() { return userId; }
     public Instant getCreatedAt() { return createdAt; }
     public String getModelName() { return modelName; }
     public String getPath() { return path; }
@@ -93,8 +119,8 @@ public class PredictionHistory {
     public String getOverlayPngBase64() { return overlayPngBase64; }
     public List<Instance> getInstances() { return instances; }
 
-    public void setId(String id) { this.id = id; }
-    public void setUserId(String userId) { this.userId = userId; }
+    public void setId(UUID id) { this.id = id; }
+    public void setUserId(UUID userId) { this.userId = userId; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public void setModelName(String modelName) { this.modelName = modelName; }
     public void setPath(String path) { this.path = path; }
