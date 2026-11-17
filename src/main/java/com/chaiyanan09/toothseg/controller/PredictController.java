@@ -3,6 +3,7 @@ package com.chaiyanan09.toothseg.controller;
 import com.chaiyanan09.toothseg.client.MlClient;
 import com.chaiyanan09.toothseg.history.PredictionHistory;
 import com.chaiyanan09.toothseg.repository.PredictionHistoryRepository;
+import com.chaiyanan09.toothseg.security.CurrentUser;
 import com.chaiyanan09.toothseg.service.CloudinaryService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -56,7 +57,7 @@ public class PredictController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Uploaded file is empty or missing");
         }
 
-        String userId = extractUserId(auth);
+        UUID userId = CurrentUser.id(auth);
 
         String safePath = sanitizePath(path);
         if (safePath == null || safePath.isBlank()) {
@@ -104,7 +105,7 @@ public class PredictController {
             // ทำให้ไม่ชนกัน ถ้าทายไฟล์เดิมซ้ำ
             String runId = Long.toString(Instant.now().toEpochMilli(), 36);
             try {
-                String inputPublicId = safePublicId(userId, "input", baseId + "__" + runId);
+                String inputPublicId = safePublicId(userId.toString(), "input", baseId + "__" + runId);
                 Map<?, ?> inRes = cloudinary.uploadAuthenticated(file.getBytes(), inputPublicId);
                 if (inRes != null) {
                     String pid = asString(inRes.get("public_id"), inputPublicId);
@@ -125,7 +126,7 @@ public class PredictController {
                 try {
                     byte[] overlayBytes = Base64.getDecoder().decode(overlayB64);
 
-                    String overlayPublicId = safePublicId(userId, "predict", baseId + "__" + runId);
+                    String overlayPublicId = safePublicId(userId.toString(), "predict", baseId + "__" + runId);
                     Map<?, ?> outRes = cloudinary.uploadAuthenticated(overlayBytes, overlayPublicId);
                     if (outRes != null) {
                         String pid = asString(outRes.get("public_id"), overlayPublicId);
@@ -165,7 +166,7 @@ public class PredictController {
 
     @GetMapping("/history")
     public List<PredictionHistory> history(Authentication auth) {
-        String userId = extractUserId(auth);
+        UUID userId = CurrentUser.id(auth);
         List<PredictionHistory> list = historyRepo.findByUserIdOrderByCreatedAtDesc(userId);
 
         if (cloudinary.isEnabled()) {
@@ -179,8 +180,8 @@ public class PredictController {
 
     @GetMapping("/history/{id}")
     public PredictionHistory historyOne(Authentication auth, @PathVariable String id) {
-        String userId = extractUserId(auth);
-        PredictionHistory h = historyRepo.findByIdAndUserId(id, userId)
+        UUID userId = CurrentUser.id(auth);
+        PredictionHistory h = historyRepo.findByIdAndUserId(parseHistoryId(id), userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "History not found"));
 
         if (cloudinary.isEnabled()) {
@@ -191,9 +192,9 @@ public class PredictController {
 
     @DeleteMapping("/history/{id}")
     public ResponseEntity<Void> deleteHistory(Authentication auth, @PathVariable String id) {
-        String userId = extractUserId(auth);
+        UUID userId = CurrentUser.id(auth);
 
-        PredictionHistory h = historyRepo.findByIdAndUserId(id, userId)
+        PredictionHistory h = historyRepo.findByIdAndUserId(parseHistoryId(id), userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "History not found"));
 
         // Optional:
@@ -215,10 +216,13 @@ public class PredictController {
         }
     }
 
-    private String extractUserId(Authentication auth) {
-        Object principal = auth.getPrincipal();
-        if (principal instanceof String s) return s;
-        return auth.getName();
+    // id ใน URL ต้องเป็น UUID ถ้าไม่ใช่ถือว่าไม่พบ
+    private static UUID parseHistoryId(String id) {
+        try {
+            return UUID.fromString(id);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "History not found");
+        }
     }
 
     private static String sanitizePath(String p) {

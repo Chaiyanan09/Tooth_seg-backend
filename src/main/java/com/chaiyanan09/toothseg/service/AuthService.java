@@ -51,6 +51,6 @@ public class AuthService {
             throw new IllegalArgumentException("Invalid email or password.");
         }
 
-        return jwt.createToken(u.id, u.email);
+        return jwt.createToken(u.id.toString(), u.email);
     }
 }
